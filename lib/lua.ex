@@ -12,6 +12,7 @@ defmodule Lua do
   alias Lua.VM.Display
   alias Lua.VM.Executor
   alias Lua.VM.InternalError
+  alias Lua.VM.PrintSink
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
@@ -131,6 +132,14 @@ defmodule Lua do
         iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(function() while true do end end)")
         iex> message =~ "instruction budget exceeded"
         true
+
+  * `:print` - (default `:stdout`) where `print` sends each line: `:stdout` writes it to standard
+    output, `:capture` keeps it in the VM for `print_output/1`, and a 1-arity function is called
+    with it. Capture keeps a script from writing to the host's logs.
+
+  * `:max_print_output_bytes` - (default 1 MiB) bound on what `print: :capture` keeps. Past it,
+    `print` drops its lines and `print_output_truncated?/1` returns `true`. Accepts a positive
+    integer or `:infinity`.
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
@@ -141,7 +150,9 @@ defmodule Lua do
         debug: false,
         max_call_depth: :infinity,
         max_string_bytes: Lua.VM.Limits.max_string_bytes(),
-        max_instructions: :infinity
+        max_instructions: :infinity,
+        print: :stdout,
+        max_print_output_bytes: PrintSink.default_max_bytes()
       )
 
     sandboxed = Keyword.fetch!(opts, :sandboxed)
@@ -150,6 +161,8 @@ defmodule Lua do
     max_call_depth = validate_max_call_depth!(Keyword.fetch!(opts, :max_call_depth))
     max_string_bytes = validate_max_string_bytes!(Keyword.fetch!(opts, :max_string_bytes))
     max_instructions = validate_max_instructions!(Keyword.fetch!(opts, :max_instructions))
+    print_target = validate_print!(Keyword.fetch!(opts, :print))
+    max_print_output_bytes = validate_max_print_output_bytes!(Keyword.fetch!(opts, :max_print_output_bytes))
 
     lua = template(sandboxed, exclude)
 
@@ -160,13 +173,14 @@ defmodule Lua do
           lua.state
           | max_call_depth: max_call_depth,
             max_string_bytes: max_string_bytes,
-            max_instructions: max_instructions
+            max_instructions: max_instructions,
+            print_sink: PrintSink.new(print_target, max_print_output_bytes)
         }
     }
   end
 
-  # A freshly built VM is a pure function of the sandbox options — the limits
-  # and `:debug` are patched onto the finished struct above, and every later
+  # A freshly built VM is a pure function of the sandbox options — the limits,
+  # the print sink and `:debug` are patched onto the finished struct above, and every later
   # mutation is copy-on-write — so the two shapes that dominate real use are
   # memoized rather than rebuilt. Installing the standard library was four
   # fifths of what `new/1` cost, and it produces the same value every time.
@@ -215,6 +229,21 @@ defmodule Lua do
   defp validate_max_instructions!(other) do
     raise ArgumentError,
           ":max_instructions must be a positive integer or :infinity, got: #{inspect(other)}"
+  end
+
+  defp validate_print!(target) when target in [:capture, :stdout], do: target
+  defp validate_print!(write_line) when is_function(write_line, 1), do: write_line
+
+  defp validate_print!(other) do
+    raise ArgumentError, ":print must be :capture, :stdout or a 1-arity function, got: #{inspect(other)}"
+  end
+
+  defp validate_max_print_output_bytes!(:infinity), do: :infinity
+  defp validate_max_print_output_bytes!(bytes) when is_integer(bytes) and bytes > 0, do: bytes
+
+  defp validate_max_print_output_bytes!(other) do
+    raise ArgumentError,
+          ":max_print_output_bytes must be a positive integer or :infinity, got: #{inspect(other)}"
   end
 
   @doc """
@@ -1131,6 +1160,26 @@ defmodule Lua do
       end)
 
     Lua.API.install(lua, module, scope, opts[:data])
+  end
+
+  @doc """
+  Returns the lines captured under `print: :capture`, oldest first, until `clear_print_output/1`.
+
+      iex> {_, lua} = Lua.eval!(Lua.new(print: :capture), ~S[print("one") print("two", 2)])
+      iex> Lua.print_output(lua)
+      ["one", "two\\t2"]
+  """
+  @spec print_output(t()) :: [String.t()]
+  def print_output(%__MODULE__{state: state}), do: PrintSink.lines(state.print_sink)
+
+  @doc "Returns `true` once a line has crossed `:max_print_output_bytes`."
+  @spec print_output_truncated?(t()) :: boolean()
+  def print_output_truncated?(%__MODULE__{state: state}), do: state.print_sink.truncated
+
+  @doc "Empties the captured `print` output and lifts its truncation."
+  @spec clear_print_output(t()) :: t()
+  def clear_print_output(%__MODULE__{state: state} = lua) do
+    %{lua | state: %{state | print_sink: PrintSink.clear(state.print_sink)}}
   end
 
   @doc """

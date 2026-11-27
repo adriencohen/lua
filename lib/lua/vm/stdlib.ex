@@ -11,6 +11,7 @@ defmodule Lua.VM.Stdlib do
   alias Lua.VM.Executor
   alias Lua.VM.Limits
   alias Lua.VM.Numeric
+  alias Lua.VM.PrintSink
   alias Lua.VM.ProtectedCall
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
@@ -165,17 +166,18 @@ defmodule Lua.VM.Stdlib do
     end
   end
 
-  # print(...) — prints values separated by tabs, followed by a newline
+  # print(...) — joins the values with tabs and hands the line to the VM's print sink
   defp lua_print(args, state) do
-    {strings, state} =
-      Enum.reduce(args, {[], state}, fn val, {acc, st} ->
-        {str, st} = value_to_string_with_mt(val, st)
-        {[str | acc], st}
-      end)
+    {strings, state} = Enum.map_reduce(args, state, &tostring_for_print/2)
+    line_iodata = Enum.intersperse(strings, "\t")
+    Limits.check_string_size!(IO.iodata_length(line_iodata), state.max_string_bytes, state)
+    line = IO.iodata_to_binary(line_iodata)
+    {[], %{state | print_sink: PrintSink.write(state.print_sink, line)}}
+  end
 
-    output = strings |> Enum.reverse() |> Enum.join("\t")
-    IO.puts(output)
-    {[], state}
+  defp tostring_for_print(value, state) do
+    {string, state} = value_to_string_with_mt(value, state)
+    {to_string(string), state}
   end
 
   # error(message [, level]) — raises a Lua runtime error.

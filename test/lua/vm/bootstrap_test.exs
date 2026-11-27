@@ -9,6 +9,7 @@ defmodule Lua.VM.BootstrapTest do
 
   alias Lua.VM.Bootstrap
   alias Lua.VM.Limits
+  alias Lua.VM.PrintSink
   alias Lua.VM.State
 
   describe "Lua.new/1" do
@@ -74,13 +75,22 @@ defmodule Lua.VM.BootstrapTest do
       assert {[nil, nil], _} = Lua.eval!(Lua.new(), "return planted, string.shout")
     end
 
-    test "limits and :debug are per-VM, not baked into the template" do
-      limited = Lua.new(max_call_depth: 10, max_string_bytes: 1024, max_instructions: 5000, debug: true)
+    test "limits, the print sink and :debug are per-VM, not baked into the template" do
+      limited =
+        Lua.new(
+          max_call_depth: 10,
+          max_string_bytes: 1024,
+          max_instructions: 5000,
+          print: :capture,
+          max_print_output_bytes: 64,
+          debug: true
+        )
 
       assert limited.debug
       assert limited.state.max_call_depth == 10
       assert limited.state.max_string_bytes == 1024
       assert limited.state.max_instructions == 5000
+      assert limited.state.print_sink == PrintSink.new(:capture, 64)
 
       default = Lua.new()
 
@@ -88,6 +98,7 @@ defmodule Lua.VM.BootstrapTest do
       assert default.state.max_call_depth == :infinity
       assert default.state.max_string_bytes == Limits.max_string_bytes()
       assert default.state.max_instructions == :infinity
+      assert default.state.print_sink == PrintSink.new(:stdout, PrintSink.default_max_bytes())
     end
   end
 

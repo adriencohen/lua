@@ -49,6 +49,12 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
 
 ## [Unreleased]
 
+### Added
+- `Lua.new/1` option `:print` picks where `print` sends each line: `:stdout`
+  (default), `:capture` to keep it in the VM for `Lua.print_output/1`, or a
+  function. `:max_print_output_bytes` (default 1 MiB) bounds the capture, and
+  a line past `:max_string_bytes` raises the catchable string-size error.
+
 ### Fixed
 - `:max_string_bytes` is now enforced by `table.concat`, `string.gsub`,
   `string.format`, `string.pack` and `os.date`, which previously built results
