@@ -3,17 +3,8 @@ defmodule Lua.SuiteRunnerTest do
 
   alias Lua.SuiteRunner
 
-  @tmpdir Path.join(System.tmp_dir!(), "lua_suite_runner_test")
-
-  setup do
-    File.rm_rf!(@tmpdir)
-    File.mkdir_p!(@tmpdir)
-    on_exit(fn -> File.rm_rf!(@tmpdir) end)
-    :ok
-  end
-
-  defp write_lua(name, body) do
-    path = Path.join(@tmpdir, name)
+  defp write_lua(dir, name, body) do
+    path = Path.join(dir, name)
     File.write!(path, body)
     path
   end
@@ -54,10 +45,12 @@ defmodule Lua.SuiteRunnerTest do
   end
 
   describe "run_file/2 — line preservation invariant" do
+    setup {Lua.TestTmpDir, :create_unique}
+
     # If apply_skip_ranges ever stops preserving line numbers, this test
     # catches it. The whole triage workflow depends on the line in the
     # error message matching the line in the source file.
-    test "assertion error reports the original line number, with and without skip ranges" do
+    test "assertion error reports the original line number, with and without skip ranges", %{tmp_dir: tmp_dir} do
       # Eleven lines total; the failing assert is on line 11.
       source = """
       -- line 1 (filler)
@@ -73,7 +66,7 @@ defmodule Lua.SuiteRunnerTest do
       assert(false, "boom")
       """
 
-      path = write_lua("line_check.lua", source)
+      path = write_lua(tmp_dir, "line_check.lua", source)
 
       {:error, err_no_skip} = SuiteRunner.run_file(path)
       {:error, err_with_skip} = SuiteRunner.run_file(path, skip_ranges: [2..4])
@@ -85,13 +78,13 @@ defmodule Lua.SuiteRunnerTest do
              "expected failing line to remain 11 after skipping 2..4, got #{inspect(err_with_skip.line)} (#{err_with_skip.__struct__})"
     end
 
-    test "skipping the failing statement makes the file pass" do
+    test "skipping the failing statement makes the file pass", %{tmp_dir: tmp_dir} do
       source = """
       local x = 1
       assert(false, "would fail")
       """
 
-      path = write_lua("skipme.lua", source)
+      path = write_lua(tmp_dir, "skipme.lua", source)
 
       assert {:error, _} = SuiteRunner.run_file(path)
       assert :ok = SuiteRunner.run_file(path, skip_ranges: [2..2])

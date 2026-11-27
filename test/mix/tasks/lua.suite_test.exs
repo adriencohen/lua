@@ -5,27 +5,16 @@ defmodule Mix.Tasks.Lua.SuiteTest do
 
   alias Mix.Tasks.Lua.Suite
 
-  @tmpdir Path.join(System.tmp_dir!(), "mix_lua_suite_test")
+  setup {Lua.TestTmpDir, :create_unique}
 
-  setup do
-    File.rm_rf!(@tmpdir)
-    File.mkdir_p!(@tmpdir)
-    on_exit(fn -> File.rm_rf!(@tmpdir) end)
-    :ok
-  end
-
-  defp write_lua(name, body) do
-    path = Path.join(@tmpdir, name)
-    File.write!(path, body)
-    path
-  end
+  defp write_lua(dir, name, body), do: File.write!(Path.join(dir, name), body)
 
   describe "run/1" do
-    test "prints a summary with passing and failing counts" do
-      write_lua("good.lua", "return 1")
-      write_lua("bad.lua", ~s|assert(1 == 2, "nope")\n|)
+    test "prints a summary with passing and failing counts", %{tmp_dir: tmp_dir} do
+      write_lua(tmp_dir, "good.lua", "return 1")
+      write_lua(tmp_dir, "bad.lua", ~s|assert(1 == 2, "nope")\n|)
 
-      output = capture_io(fn -> Suite.run(["--dir", @tmpdir]) end)
+      output = capture_io(fn -> Suite.run(["--dir", tmp_dir]) end)
 
       assert output =~ ~r/passing:\s*1/
       assert output =~ ~r/failing:\s*1/
@@ -33,26 +22,26 @@ defmodule Mix.Tasks.Lua.SuiteTest do
       assert output =~ "bad.lua"
     end
 
-    test "--filter restricts which files run" do
-      write_lua("math_ops.lua", "return 1")
-      write_lua("string_ops.lua", "return 1")
+    test "--filter restricts which files run", %{tmp_dir: tmp_dir} do
+      write_lua(tmp_dir, "math_ops.lua", "return 1")
+      write_lua(tmp_dir, "string_ops.lua", "return 1")
 
       output =
-        capture_io(fn -> Suite.run(["--dir", @tmpdir, "--filter", "math"]) end)
+        capture_io(fn -> Suite.run(["--dir", tmp_dir, "--filter", "math"]) end)
 
       assert output =~ "math_ops"
       refute output =~ "string_ops"
     end
 
-    test "--timeout flags slow files as timeout" do
+    test "--timeout flags slow files as timeout", %{tmp_dir: tmp_dir} do
       # An infinite loop. Without a per-file timeout this would hang
       # the test forever.
-      write_lua("loop.lua", "while true do end\n")
-      write_lua("ok.lua", "return 1")
+      write_lua(tmp_dir, "loop.lua", "while true do end\n")
+      write_lua(tmp_dir, "ok.lua", "return 1")
 
       output =
         capture_io(fn ->
-          Suite.run(["--dir", @tmpdir, "--timeout", "200"])
+          Suite.run(["--dir", tmp_dir, "--timeout", "200"])
         end)
 
       assert output =~ ~r/timeout:\s*1/
@@ -63,30 +52,30 @@ defmodule Mix.Tasks.Lua.SuiteTest do
       refute output =~ "failing files"
     end
 
-    test "exits 1 when --filter matches no files" do
-      write_lua("a.lua", "return 1")
+    test "exits 1 when --filter matches no files", %{tmp_dir: tmp_dir} do
+      write_lua(tmp_dir, "a.lua", "return 1")
 
       assert_raise Mix.Error, ~r/--filter/, fn ->
-        Suite.run(["--dir", @tmpdir, "--filter", "zzz"])
+        Suite.run(["--dir", tmp_dir, "--filter", "zzz"])
       end
     end
 
-    test "exits 1 when no files pass" do
-      write_lua("a.lua", "error('fail')")
+    test "exits 1 when no files pass", %{tmp_dir: tmp_dir} do
+      write_lua(tmp_dir, "a.lua", "error('fail')")
 
-      assert catch_exit(capture_io(fn -> Suite.run(["--dir", @tmpdir]) end)) == {:shutdown, 1}
+      assert catch_exit(capture_io(fn -> Suite.run(["--dir", tmp_dir]) end)) == {:shutdown, 1}
     end
 
-    test "raises when the dir does not exist" do
+    test "raises when the dir does not exist", %{tmp_dir: tmp_dir} do
       assert_raise Mix.Error, ~r/does not exist/, fn ->
-        Suite.run(["--dir", "/tmp/nonexistent_suite_dir_42891"])
+        Suite.run(["--dir", Path.join(tmp_dir, "missing")])
       end
     end
   end
 
   describe "--status" do
-    test "summarises a fixture skip file with totals and categories" do
-      skip_file = Path.join(@tmpdir, "skips.exs")
+    test "summarises a fixture skip file with totals and categories", %{tmp_dir: tmp_dir} do
+      skip_file = Path.join(tmp_dir, "skips.exs")
 
       File.write!(skip_file, """
       %{
@@ -112,9 +101,9 @@ defmodule Mix.Tasks.Lua.SuiteTest do
   end
 
   describe "--audit" do
-    test "reports CANDIDATE when a :all entry's file passes outright" do
-      write_lua("passing.lua", "return 1\n")
-      skip_file = Path.join(@tmpdir, "skips.exs")
+    test "reports CANDIDATE when a :all entry's file passes outright", %{tmp_dir: tmp_dir} do
+      write_lua(tmp_dir, "passing.lua", "return 1\n")
+      skip_file = Path.join(tmp_dir, "skips.exs")
 
       File.write!(skip_file, """
       %{"passing.lua" => [%{lines: :all, category: :unimplemented, reason: "t", issue: nil}]}
@@ -122,7 +111,7 @@ defmodule Mix.Tasks.Lua.SuiteTest do
 
       output =
         capture_io(fn ->
-          Suite.run(["--audit", "--dir", @tmpdir, "--skip-file", skip_file, "--timeout", "5000"])
+          Suite.run(["--audit", "--dir", tmp_dir, "--skip-file", skip_file, "--timeout", "5000"])
         end)
 
       assert output =~ "passing.lua"
@@ -130,9 +119,9 @@ defmodule Mix.Tasks.Lua.SuiteTest do
       assert output =~ "1 promotion candidates"
     end
 
-    test "reports STALE when a specific range is no longer needed" do
-      write_lua("a.lua", "local x = 1\nreturn x\n")
-      skip_file = Path.join(@tmpdir, "skips.exs")
+    test "reports STALE when a specific range is no longer needed", %{tmp_dir: tmp_dir} do
+      write_lua(tmp_dir, "a.lua", "local x = 1\nreturn x\n")
+      skip_file = Path.join(tmp_dir, "skips.exs")
 
       File.write!(skip_file, """
       %{"a.lua" => [%{lines: 1..1, category: :executor, reason: "t", issue: nil}]}
@@ -140,7 +129,7 @@ defmodule Mix.Tasks.Lua.SuiteTest do
 
       output =
         capture_io(fn ->
-          Suite.run(["--audit", "--dir", @tmpdir, "--skip-file", skip_file, "--timeout", "5000"])
+          Suite.run(["--audit", "--dir", tmp_dir, "--skip-file", skip_file, "--timeout", "5000"])
         end)
 
       assert output =~ "a.lua:1"
@@ -148,9 +137,9 @@ defmodule Mix.Tasks.Lua.SuiteTest do
       assert output =~ "1 stale entries"
     end
 
-    test "reports ACTIVE when a :all entry's file still fails without ranges" do
-      write_lua("broken.lua", "assert(false, 'still bad')\n")
-      skip_file = Path.join(@tmpdir, "skips.exs")
+    test "reports ACTIVE when a :all entry's file still fails without ranges", %{tmp_dir: tmp_dir} do
+      write_lua(tmp_dir, "broken.lua", "assert(false, 'still bad')\n")
+      skip_file = Path.join(tmp_dir, "skips.exs")
 
       File.write!(skip_file, """
       %{"broken.lua" => [%{lines: :all, category: :unimplemented, reason: "t", issue: nil}]}
@@ -158,7 +147,7 @@ defmodule Mix.Tasks.Lua.SuiteTest do
 
       output =
         capture_io(fn ->
-          Suite.run(["--audit", "--dir", @tmpdir, "--skip-file", skip_file, "--timeout", "5000"])
+          Suite.run(["--audit", "--dir", tmp_dir, "--skip-file", skip_file, "--timeout", "5000"])
         end)
 
       assert output =~ "broken.lua"
@@ -166,12 +155,12 @@ defmodule Mix.Tasks.Lua.SuiteTest do
       assert output =~ "first failure at line 1"
     end
 
-    test "labels failures that lack a :line field with the exception name" do
+    test "labels failures that lack a :line field with the exception name", %{tmp_dir: tmp_dir} do
       # Syntax garbage triggers Lua.CompilerException, which carries
       # formatted error messages but no top-level :line field. Audit
       # should fall back to a struct-name label instead of bare "?".
-      write_lua("bad_syntax.lua", "@@@ not lua @@@\n")
-      skip_file = Path.join(@tmpdir, "skips.exs")
+      write_lua(tmp_dir, "bad_syntax.lua", "@@@ not lua @@@\n")
+      skip_file = Path.join(tmp_dir, "skips.exs")
 
       File.write!(skip_file, """
       %{"bad_syntax.lua" => [%{lines: :all, category: :unimplemented, reason: "t", issue: nil}]}
@@ -179,7 +168,7 @@ defmodule Mix.Tasks.Lua.SuiteTest do
 
       output =
         capture_io(fn ->
-          Suite.run(["--audit", "--dir", @tmpdir, "--skip-file", skip_file, "--timeout", "5000"])
+          Suite.run(["--audit", "--dir", tmp_dir, "--skip-file", skip_file, "--timeout", "5000"])
         end)
 
       assert output =~ "bad_syntax.lua"
@@ -189,8 +178,8 @@ defmodule Mix.Tasks.Lua.SuiteTest do
   end
 
   describe "skip-file validation" do
-    test "raises when a file mixes lines: :all with specific ranges" do
-      skip_file = Path.join(@tmpdir, "skips.exs")
+    test "raises when a file mixes lines: :all with specific ranges", %{tmp_dir: tmp_dir} do
+      skip_file = Path.join(tmp_dir, "skips.exs")
 
       File.write!(skip_file, """
       %{

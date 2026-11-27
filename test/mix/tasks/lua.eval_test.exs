@@ -16,23 +16,15 @@ defmodule Mix.Tasks.Lua.EvalTest do
     end
 
     test "captures Lua print() output before the result" do
-      path = Path.join(System.tmp_dir!(), "mix_lua_eval_print.lua")
-      File.write!(path, ~s|print("hi from lua")\nreturn 42\n|)
+      output =
+        capture_io(fn ->
+          Eval.run(["test/fixtures/prints_then_returns.lua"])
+        end)
 
-      try do
-        output =
-          capture_io(fn ->
-            Eval.run([path])
-          end)
+      assert output =~ "hi from lua"
+      assert output =~ "[42]"
 
-        # print() and result both go to stdout; the print line comes first.
-        assert output =~ "hi from lua"
-        assert output =~ "[42]"
-
-        ["hi from lua", _ | _] = String.split(output, "\n", trim: true)
-      after
-        File.rm(path)
-      end
+      ["hi from lua", _ | _] = String.split(output, "\n", trim: true)
     end
 
     test "raises Mix error for missing file" do

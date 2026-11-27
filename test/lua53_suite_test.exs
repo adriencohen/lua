@@ -5,6 +5,9 @@ defmodule Lua.Lua53SuiteTest do
 
   @moduletag :lua53
 
+  # On a loaded machine calls.lua can outlast ExUnit's 60 s default.
+  @moduletag timeout: to_timeout(minute: 5)
+
   @test_dir "test/lua53_tests"
   @skip_file "test/lua53_skips.exs"
 

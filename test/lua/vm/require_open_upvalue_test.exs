@@ -11,12 +11,7 @@ defmodule Lua.VM.RequireOpenUpvalueTest do
   # index* would reuse the inner's stale cell — silently aliasing the
   # outer's local to whatever the inner had at that register.
 
-  setup do
-    tmp_dir = Path.join(System.tmp_dir!(), "lua_require_upvalue_test_#{System.unique_integer([:positive])}")
-    File.mkdir_p!(tmp_dir)
-    on_exit(fn -> File.rm_rf!(tmp_dir) end)
-    %{tmp_dir: tmp_dir}
-  end
+  setup {Lua.TestTmpDir, :create_unique}
 
   defp eval_with_path(code, tmp_dir) do
     lua = Lua.new(exclude: [[:package], [:require]])

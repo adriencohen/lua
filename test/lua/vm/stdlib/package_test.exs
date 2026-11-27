@@ -59,12 +59,7 @@ defmodule Lua.VM.Stdlib.PackageTest do
   end
 
   describe "require recursion guard" do
-    setup do
-      tmp_dir = Path.join(System.tmp_dir!(), "lua_require_test_#{System.unique_integer([:positive])}")
-      File.mkdir_p!(tmp_dir)
-      on_exit(fn -> File.rm_rf!(tmp_dir) end)
-      %{tmp_dir: tmp_dir}
-    end
+    setup {Lua.TestTmpDir, :create_unique}
 
     defp eval_with_path(code, tmp_dir) do
       lua = Lua.new(exclude: [[:package], [:require]])
@@ -147,7 +142,8 @@ defmodule Lua.VM.Stdlib.PackageTest do
   end
 
   describe "dotted module names" do
-    @tag :tmp_dir
+    setup {Lua.TestTmpDir, :create_unique}
+
     test "require('foo.bar') resolves dots to directory separators", %{tmp_dir: tmp_dir} do
       File.mkdir_p!(Path.join(tmp_dir, "foo"))
 
