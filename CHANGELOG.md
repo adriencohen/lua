@@ -49,6 +49,19 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
 
 ## [Unreleased]
 
+### Added
+- `Lua.new/1` option `:max_table_elements` (default 1,000,000, was a fixed
+  10,000,000) caps the elements one stdlib call may produce or walk, now
+  also for `string.byte`, `string.unpack`, `utf8.codepoint` and
+  `table.insert`/`remove`.
+
+### Changed
+- Pattern matching and stdlib calls whose work grows with their input are
+  charged to `:max_instructions`, one instruction per 16 units of work, so a
+  backtracking pattern raises `"instruction budget exceeded"` instead of
+  running for minutes.
+- `string.gmatch` matches lazily, one match per iteration.
+
 ### Fixed
 - `:max_string_bytes` is now enforced by `table.concat`, `string.gsub`,
   `string.format`, `string.pack` and `os.date`, which previously built results
@@ -62,6 +75,11 @@ is in the [`1.0.0-rc.0`](#100-rc0---2026-05-26) entry below.
   metamethods, `__call`, `Lua.call_function/3`), so recursion through them
   raises `"stack overflow"` instead of exhausting the host.
 - A `__call` chain through callable tables is hop-limited like `__index`.
+- `table.sort` with a comparator calls it O(n log n) times, not O(n²).
+- Passing many values through a call (`table.unpack`, `...`) is linear, not
+  quadratic.
+- Patterns raise `"too many captures"` past 32 captures and
+  `"pattern too complex"` past 200 nested backtracks, as in PUC-Lua.
 
 ## [1.0.2] - 2026-07-28
 

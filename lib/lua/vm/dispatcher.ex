@@ -2931,15 +2931,8 @@ defmodule Lua.VM.Dispatcher do
   # (e.g. `f(...)` where the variadic call site has more args than
   # the caller's other locals require).
   defp write_varargs(regs, base, varargs, _n) do
-    n = length(varargs)
-    regs = grow_regs(regs, base + n)
-    write_varargs_loop(regs, base, varargs, 0)
-  end
-
-  defp write_varargs_loop(regs, _base, [], n), do: {regs, n}
-
-  defp write_varargs_loop(regs, base, [v | rest], n) do
-    write_varargs_loop(:erlang.setelement(base + n + 1, regs, v), base, rest, n + 1)
+    count = length(varargs)
+    {write_values(regs, base, varargs, count), count}
   end
 
   # `:vararg` count>0 form: write the first `n` varargs, pad with nil.
@@ -2979,9 +2972,19 @@ defmodule Lua.VM.Dispatcher do
   # statically reserved size — mirrors the interpreter's
   # `ensure_regs_capacity/2` at the post-call site (executor.ex:1873).
 
-  defp write_results(regs, base, results) do
-    regs = grow_regs(regs, base + length(results))
-    write_results_loop(regs, base, results)
+  defp write_results(regs, base, results), do: write_values(regs, base, results, length(results))
+
+  # Longer runtime-sized lists are spliced in with one tuple rebuild: a
+  # `setelement` per value copies the tuple each time, which is quadratic.
+  @splice_threshold 32
+
+  defp write_values(regs, base, values, count) when count > @splice_threshold do
+    {head, tail} = regs |> grow_regs(base + count) |> Tuple.to_list() |> Enum.split(base)
+    List.to_tuple(head ++ values ++ Enum.drop(tail, count))
+  end
+
+  defp write_values(regs, base, values, count) do
+    regs |> grow_regs(base + count) |> write_results_loop(base, values)
   end
 
   defp write_results_loop(regs, _base, []), do: regs
@@ -3137,21 +3140,11 @@ defmodule Lua.VM.Dispatcher do
 
   # Lazy regs-tuple growth. Used at the points where multi-return
   # expansion or vararg writes can exceed the statically reserved size.
-  # `Tuple.insert_at/3` is O(n) per insert; this is fine because growth
-  # is rare and bounded by the call's actual result count.
-  defp grow_regs(regs, needed) do
-    current = tuple_size(regs)
+  # A few slots are cheaper to append one by one than to rebuild for.
+  defp grow_regs(regs, needed) when needed <= tuple_size(regs), do: regs
 
-    if needed > current do
-      grow_tuple(regs, needed - current)
-    else
-      regs
-    end
-  end
+  defp grow_regs(regs, needed) when needed - tuple_size(regs) < 4,
+    do: grow_regs(:erlang.append_element(regs, nil), needed)
 
-  defp grow_tuple(tuple, 0), do: tuple
-
-  defp grow_tuple(tuple, n) do
-    grow_tuple(Tuple.insert_at(tuple, tuple_size(tuple), nil), n - 1)
-  end
+  defp grow_regs(regs, needed), do: List.to_tuple(Tuple.to_list(regs) ++ List.duplicate(nil, needed - tuple_size(regs)))
 end

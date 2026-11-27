@@ -44,6 +44,7 @@ defmodule Lua.VM.State do
             # higher of the two is live (see `stamp_tally/2`). Never written
             # per opcode.
             instruction_count: 0,
+            max_table_elements: Limits.max_element_count(),
             metatables: %{},
             upvalue_cells: %{},
             open_upvalues: %{},
@@ -73,6 +74,7 @@ defmodule Lua.VM.State do
           max_string_bytes: pos_integer() | :infinity,
           max_instructions: pos_integer() | :infinity,
           instruction_count: non_neg_integer(),
+          max_table_elements: pos_integer() | :infinity,
           metatables: map(),
           upvalue_cells: map(),
           tables: %{optional(non_neg_integer()) => Table.t()},

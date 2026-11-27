@@ -1612,11 +1612,7 @@ defmodule Lua.VM.Executor do
         # honors now that no fixed register buffer absorbs the overflow.
         n = length(varargs)
         regs = ensure_regs_capacity(regs, base + n)
-
-        regs =
-          Enum.reduce(Enum.with_index(varargs), regs, fn {val, i}, r ->
-            put_elem(r, base + i, val)
-          end)
+        regs = write_many_to_regs(regs, base, varargs, n)
 
         {regs, %{state | multi_return_count: n}}
       else
@@ -3017,7 +3013,7 @@ defmodule Lua.VM.Executor do
         results_list = List.wrap(results)
         count = length(results_list)
         caller_regs = ensure_regs_capacity(caller_regs, base + count)
-        caller_regs = write_list_to_regs(caller_regs, base, results_list)
+        caller_regs = write_many_to_regs(caller_regs, base, results_list, count)
 
         state = %{state | multi_return_count: count}
 
@@ -3122,7 +3118,7 @@ defmodule Lua.VM.Executor do
         results_list = List.wrap(results)
         count = length(results_list)
         regs = ensure_regs_capacity(regs, base + count)
-        regs = write_list_to_regs(regs, base, results_list)
+        regs = write_many_to_regs(regs, base, results_list, count)
 
         state = %{state | multi_return_count: count}
         do_execute(rest, regs, upvalues, proto, state, cont, frames, line, instruction_count)
@@ -3167,14 +3163,11 @@ defmodule Lua.VM.Executor do
       # Append nil slots with a small headroom so back-to-back expansions
       # don't repeatedly reallocate.
       extra = needed_size - current_size + 16
-      grow_tuple(regs, extra)
+      List.to_tuple(Tuple.to_list(regs) ++ List.duplicate(nil, extra))
     else
       regs
     end
   end
-
-  defp grow_tuple(tuple, 0), do: tuple
-  defp grow_tuple(tuple, n), do: grow_tuple(Tuple.insert_at(tuple, tuple_size(tuple), nil), n - 1)
 
   # ── find_loop_exit — scan cont for the nearest {:loop_exit, _} marker ──────
 
@@ -4100,6 +4093,17 @@ defmodule Lua.VM.Executor do
   end
 
   # ── Return helpers: write a list of values into a contiguous register range ─
+
+  # Longer runtime-sized lists are spliced in with one tuple rebuild: a
+  # `setelement` per value copies the tuple each time, which is quadratic.
+  @splice_threshold 32
+
+  defp write_many_to_regs(regs, off, list, count) when count > @splice_threshold do
+    {head, tail} = regs |> Tuple.to_list() |> Enum.split(off)
+    List.to_tuple(head ++ list ++ Enum.drop(tail, count))
+  end
+
+  defp write_many_to_regs(regs, off, list, _count), do: write_list_to_regs(regs, off, list)
 
   defp write_list_to_regs(regs, _off, []), do: regs
 

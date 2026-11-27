@@ -12,6 +12,7 @@ defmodule Lua do
   alias Lua.VM.Display
   alias Lua.VM.Executor
   alias Lua.VM.InternalError
+  alias Lua.VM.Limits
   alias Lua.VM.RuntimeError
   alias Lua.VM.State
   alias Lua.VM.Table
@@ -128,9 +129,21 @@ defmodule Lua do
     back-edges and call boundaries, so the default `:infinity` path carries no per-instruction
     cost. The budget is fresh per top-level evaluation and recoverable via `pcall`.
 
+    Work inside stdlib calls is charged too, one instruction per 16 units: a byte scanned or
+    built, an element visited or returned, a pattern-matcher step.
+
         iex> lua = Lua.new(max_instructions: 1000)
         iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(function() while true do end end)")
         iex> message =~ "instruction budget exceeded"
+        true
+
+  * `:max_table_elements` - (default 1,000,000) the most elements one stdlib call may produce
+    or walk (`table.unpack`, `table.concat`, `string.byte`, …), checked before the work starts.
+    Accepts a positive integer or `:infinity`.
+
+        iex> lua = Lua.new(max_table_elements: 100)
+        iex> {[false, message], _lua} = Lua.eval!(lua, "return pcall(table.unpack, {}, 1, 1000)")
+        iex> message =~ "too many results to unpack"
         true
   """
   @spec new(keyword()) :: t()
@@ -141,8 +154,9 @@ defmodule Lua do
         exclude: [],
         debug: false,
         max_call_depth: :infinity,
-        max_string_bytes: Lua.VM.Limits.max_string_bytes(),
-        max_instructions: :infinity
+        max_string_bytes: Limits.max_string_bytes(),
+        max_instructions: :infinity,
+        max_table_elements: Limits.max_element_count()
       )
 
     sandboxed = Keyword.fetch!(opts, :sandboxed)
@@ -151,6 +165,7 @@ defmodule Lua do
     max_call_depth = validate_max_call_depth!(Keyword.fetch!(opts, :max_call_depth))
     max_string_bytes = validate_max_string_bytes!(Keyword.fetch!(opts, :max_string_bytes))
     max_instructions = validate_max_instructions!(Keyword.fetch!(opts, :max_instructions))
+    max_table_elements = validate_max_table_elements!(Keyword.fetch!(opts, :max_table_elements))
 
     lua = template(sandboxed, exclude)
 
@@ -161,7 +176,8 @@ defmodule Lua do
           lua.state
           | max_call_depth: max_call_depth,
             max_string_bytes: max_string_bytes,
-            max_instructions: max_instructions
+            max_instructions: max_instructions,
+            max_table_elements: max_table_elements
         }
     }
   end
@@ -216,6 +232,14 @@ defmodule Lua do
   defp validate_max_instructions!(other) do
     raise ArgumentError,
           ":max_instructions must be a positive integer or :infinity, got: #{inspect(other)}"
+  end
+
+  defp validate_max_table_elements!(:infinity), do: :infinity
+  defp validate_max_table_elements!(count) when is_integer(count) and count > 0, do: count
+
+  defp validate_max_table_elements!(other) do
+    raise ArgumentError,
+          ":max_table_elements must be a positive integer or :infinity, got: #{inspect(other)}"
   end
 
   @doc """
